@@ -9,7 +9,7 @@ library(survey)
 library(foreign)
 
 # data source
-nhanes2 <- read.dta("nhanes2.dta")
+nhanes2 <- read.dta("http://www.stata-press.com/data/r12/nhanes2.dta")
 # fixing a miscoded variable
 tapply(nhanes2$bpsystol,nhanes2$highbp,FUN=max)
 nhanes2$highbp <- as.integer( (nhanes2$bpsystol>=140) | (nhanes2$bpdiast>=90) )
@@ -43,11 +43,17 @@ confint(svy.prop.race)
 # two-way tabulation
 svytable(~highbp+race,nhanes2.svy)
 svychisq(~highbp+race,nhanes2.svy)
-svychisq(~highbp+race,nhanes2.svy)
 for(st in c("F",  "Chisq","Wald","adjWald","saddlepoint")) {
   cat("Statistic option = ",st,"\n")
   print(svychisq(~highbp+race,nhanes2.svy,stat=st))
 }
+
+# two-way tabulation of totals
+(svyxtab <- svytotal(~interaction(highbp,race),nhanes2.svy))
+ftable(svyxtab,rownames=list(highbp=c("Normal BP","Hypertonic"),race=c("White","Black","Other")))
+
+# subpopulations/domains
+svyby(~highbp,by=~race,design=nhanes2.svy,FUN=svymean)
 
 # continuous variables
 svymean(~bpsystol+bpdiast,nhanes2.svy)
@@ -62,13 +68,17 @@ svyhist(~bmi,nhanes2.svy)
 # export the graph -- not sure if works
 # png(filename="bmi_hist_r.png",res=72)
 
+# singleton PSU
+svymean(~hdresult,nhanes2.svy)
+
 # t-tests
 svyttest(bmi~sex,nhanes2.svy)
 regTermTest(svyglm(bmi~sex,nhanes2.svy),"sex")
 
 # linear regression
 summary(nhanes2$bmi)
-svyglm(bmi~race+age+sex,nhanes2.svy)
+(bmi.reg <- svyglm(bmi~race+age+sex,nhanes2.svy))
+regTermTest(bmi.reg,"sex")
 
 # logistic regression
 (logit.highbp <- svyglm(highbp ~ race+age+sex,nhanes2.svy,family=binomial()))

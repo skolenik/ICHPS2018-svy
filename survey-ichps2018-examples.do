@@ -45,6 +45,9 @@ svy : tab highbp race, col se
 * with row proportions
 svy : tab highbp race, row se
 
+* estimation in subpopulation/domains
+svy, subpop(if race==2): prop highbp
+svy : prop highbp, over(race)
 
 * continuous variables
 svy : mean bpsystol bpdiast
@@ -90,7 +93,9 @@ estat effect
 
 
 * regression, proper
-svy : regress bmi race age sex
+svy : regress bmi i.race age sex
+* wald test for the entirety of race dummies
+testparm i.race
 * design effects of the coefficients
 estat effect
 
