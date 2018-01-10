@@ -17,4 +17,4 @@ The rendered HTML file is best viewed [here](http://htmlpreview.github.io/?https
 http://www.citeulike.org/user/ctacmo/tag/ichps2018
 
 (If you are not familiar with CiteULike, please spend some time to identify links to full text, 
-and how to export references to bibtex or RIS. You can also explore the tag system.)
+and to learn how to export references to bibtex or RIS. You can also explore the tag system.)
