@@ -2,7 +2,13 @@
 
 Materials for the ICHPS 2018 workshop #8 on analysis of complex health surveys
 
-**THIS IS CURRENTLY WORK IN PROGRESS. ADDITIONAL MARKDOWN FILES WITH DETAILED COMMENTS WILL BE DEPOSITED LATER BEFORE THE WORKSHOP.**
+[survey-ichps2018-examples.do](survey-ichps2018-examples.do) straight Stata example code
+
+[survey-ichps2018-examples.r](survey-ichps2018-examples.r) straight R example code
+
+[survey-ichps2018.stmd](survey-ichps2018.stmd) Markdown file: code + comments
+
+[survey-ichps2018.html](survey-ichps2018.html) Rendered page with R code, Stata code, and output
 
 ## References
 
