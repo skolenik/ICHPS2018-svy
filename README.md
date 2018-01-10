@@ -8,7 +8,9 @@ Materials for the ICHPS 2018 workshop #8 on analysis of complex health surveys
 
 [survey-ichps2018.stmd](survey-ichps2018.stmd) Markdown file: code + comments
 
-[survey-ichps2018.html](survey-ichps2018.html) Rendered page with R code, Stata code, and output
+[survey-ichps2018.html](survey-ichps2018.html) Rendered page with R code, Stata code, and output.
+
+The rendered HTML file is best viewed [here](http://htmlpreview.github.io/?https://github.com/skolenik/ICHPS2018-svy/blob/master/survey-ichps2018.html).
 
 ## References
 
