@@ -1,0 +1,1314 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+<style>
+/* CSS for Markstat 2.0 using Pandoc 2.0 */
+body{padding:14px 28px;}
+body, table {font-family: Helvetica, Arial, Sans-serif; font-size: 14px;}
+h1, h2, h3, h4 {font-weight: normal; color: #3366cc}
+h1 {font-size: 200%;}
+h2 {font-size: 150%;}
+h3 {font-size: 120%;}
+h4 {font-size: 100%; font-weight:bold}
+img.center {display:block; margin-left:auto; margin-right:auto}
+.small{font-size:8pt;}
+a {color: black;}
+a:visited {color: #808080;}
+a.plain {text-decoration:none;}
+a.plain:hover {text-decoration:underline;}
+.em {font-weight:bold;}
+pre, code {font-family: "lucida console", monospace;}
+pre.stata {font-size:13px; line-height:13px;}
+pre {padding:8px; border:1px solid #c0c0c0; border-radius:8px; background-color:#fdfdfd;}
+code {color:#3366cc; background-color:#fafafa;}
+pre code { color:black; background-color:white}
+/* Added for Pandoc */
+figure > img, div.figure > img {display:block; margin:auto}
+figcaption, p.caption {text-align:center; font-weight:bold; color:#3366cc;}
+h1.title {text-align:center; margin-bottom:0}
+p.author, h2.author {font-style:italic; text-align:center;margin-top:4px;margin-bottom:0}
+p.date, h3.date {text-align:center;margin-top:4px; margin-bottom:0}
+/* Tables*/
+table { margin:auto; border-collapse:collapse; }
+table caption { margin-bottom:1ex;}
+th, td { padding:4px 6px;}
+thead tr:first-child th {border-top:1px solid black; padding-top:6px}
+thead tr:last-child  th {padding-bottom:6px}
+tbody tr:first-child td {border-top:1px solid black; padding-top:6px}
+tbody tr:last-child  td {padding-bottom:6px;}
+table tbody:last-child tr:last-child td {border-bottom:1px solid black;}
+</style>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>survey-ichps2018</title>
+  <style type="text/css">
+      code{white-space: pre-wrap;}
+      span.smallcaps{font-variant: small-caps;}
+      span.underline{text-decoration: underline;}
+      div.line-block{white-space: pre-line;}
+      div.column{display: inline-block; vertical-align: top; width: 50%;}
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.2/MathJax.js?config=TeX-AMS_CHTML-full" type="text/javascript"></script>
+  <!--[if lt IE 9]>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv-printshiv.min.js"></script>
+  <![endif]-->
+</head>
+<body>
+<h1 id="analysis-of-complex-health-survey-data">Analysis of Complex Health Survey Data</h1>
+<h1 id="ichps-2018">ICHPS 2018</h1>
+<p>This tutorial will provide some examples of analysis of complex survey data using both Stata and R code, with parallel examples to the extent that functionality is similar between the two.</p>
+<h2 id="source-data">Source data</h2>
+<p>We will be using an excerpt from NHANES II that is distributed by Stata Corp. to run their survey examples off. I am using the locally stored file; a stable url for the file is <a href="http://www.stata-press.com/data/r12/nhanes2.dta" class="uri">http://www.stata-press.com/data/r12/nhanes2.dta</a>.</p>
+<p>The Stata bit:</p>
+<pre class='stata'>. * use http://www.stata-press.com/data/r12/nhanes2.dta
+. use nhanes2, clear
+</pre>
+<p>The R bit:</p>
+<pre class='r'>> library(foreign)
+> nhanes2 &lt;- read.dta("nhanes2.dta")    
+> # nhanes2 &lt;- read.dta("http://www.stata-press.com/data/r12/nhanes2.dta")
+</pre>
+<p>In this data set, the high blood pressure variable was miscoded, and it needs to be fixed.</p>
+<p>The Stata bit:</p>
+<pre class='stata'>. table highbp, c(min bpsystol max bpsystol min bpdiast max bpdiast )
+
+──────────┬───────────────────────────────────────────────────────────
+1 if BP > │
+140/90, 0 │
+otherwise │ min(bpsystol)  max(bpsystol)   min(bpdiast)   max(bpdiast)
+──────────┼───────────────────────────────────────────────────────────
+        0 │            65            270             35            130
+        1 │           142            300             92            150
+──────────┴───────────────────────────────────────────────────────────
+
+. replace highbp = (bpsystol >= 140) | (bpdiast >= 90)
+(3,041 real changes made)
+</pre>
+<p>The R bit:</p>
+<pre class='r'>> tapply(nhanes2$bpsystol,nhanes2$highbp,FUN=max)
+  0   1 
+270 300 
+> nhanes2$highbp &lt;- as.integer( (nhanes2$bpsystol>=140) | (nhanes2$bpdiast>=90) )
+</pre>
+<h2 id="specifying-the-complex-sampling-design">Specifying the complex sampling design</h2>
+<p>The specification of the sampling design for this data set should include:</p>
+<ul>
+<li><p>the stratification variable is <code>strata</code> (runs from 1 to 32)</p></li>
+<li><p>the PSU varaible is <code>psu</code> (coded 1 and 2, nested within <code>strata</code>)</p></li>
+<li><p>the weight variable <code>finalwgt</code></p></li>
+</ul>
+<p>The Stata bit:</p>
+<pre class='stata'>. svyset
+
+      pweight: finalwgt
+          VCE: linearized
+  Single unit: missing
+     Strata 1: strata
+         SU 1: psu
+        FPC 1: &lt;zero>
+
+. svyset psu [pw=finalwgt], strata(strata)
+
+      pweight: finalwgt
+          VCE: linearized
+  Single unit: missing
+     Strata 1: strata
+         SU 1: psu
+        FPC 1: &lt;zero>
+
+. svydescribe
+
+Survey: Describing stage 1 sampling units
+
+      pweight: finalwgt
+          VCE: linearized
+  Single unit: missing
+     Strata 1: strata
+         SU 1: psu
+        FPC 1: &lt;zero>
+
+                                      #Obs per Unit
+                              ────────────────────────────
+Stratum    #Units     #Obs      min       mean      max   
+────────  ────────  ────────  ────────  ────────  ────────
+       1         2       380       165     190.0       215
+       2         2       185        67      92.5       118
+       3         2       348       149     174.0       199
+       4         2       460       229     230.0       231
+       5         2       252       105     126.0       147
+       6         2       298       131     149.0       167
+       7         2       476       206     238.0       270
+       8         2       338       158     169.0       180
+       9         2       244       100     122.0       144
+      10         2       262       119     131.0       143
+      11         2       275       120     137.5       155
+      12         2       314       144     157.0       170
+      13         2       342       154     171.0       188
+      14         2       405       200     202.5       205
+      15         2       380       189     190.0       191
+      16         2       336       159     168.0       177
+      17         2       393       180     196.5       213
+      18         2       359       144     179.5       215
+      20         2       285       125     142.5       160
+      21         2       214       102     107.0       112
+      22         2       301       128     150.5       173
+      23         2       341       159     170.5       182
+      24         2       438       205     219.0       233
+      25         2       256       116     128.0       140
+      26         2       261       129     130.5       132
+      27         2       283       139     141.5       144
+      28         2       299       136     149.5       163
+      29         2       503       215     251.5       288
+      30         2       365       166     182.5       199
+      31         2       308       143     154.0       165
+      32         2       450       211     225.0       239
+────────  ────────  ────────  ────────  ────────  ────────
+      31        62    10,351        67     167.0       288
+</pre>
+<p>This is a data set with 10351 observations, organized in 62 PSUs nested in 31 strata.</p>
+<p>The R bit:</p>
+<pre class='r'>> library(survey)
+> nhanes2.svy &lt;- svydesign(
++     ~psu,                 # PSU/cluster variable = psu, 
++     nest=TRUE,                # cluster IDs aren't unique but nested within strata
++     strata  = ~strata,         # stratification variable = strata
++     weights = ~finalwgt,        # weight variable = finalwgt
++     data    = nhanes2            # data source
++ )
+</pre>
+<p>This is a data set with 10351 observations, organized in 62 PSUs nested in 31 strata.</p>
+<h2 id="one-way-tabulation-proportions-and-counts">One-way tabulation: proportions and counts</h2>
+<p>The Stata bit: compare the formal estimation command <code>prop</code> (short for <code>proportion</code>) and the summary command <code>tab</code> (short for <code>tabulate</code>).</p>
+<pre class='stata'>. svy : tab highbp
+(running tabulate on estimation sample)
+
+Number of strata   =        31                Number of obs     =       10,351
+Number of PSUs     =        62                Population size   =  117,157,513
+                                              Design df         =           31
+
+──────────┬───────────
+1 if BP > │
+140/90, 0 │
+otherwise │ proportion
+──────────┼───────────
+        0 │      .6315
+        1 │      .3685
+          │ 
+    Total │          1
+──────────┴───────────
+  Key:  proportion  =  cell proportion
+
+. svy : tab race
+(running tabulate on estimation sample)
+
+Number of strata   =        31                Number of obs     =       10,351
+Number of PSUs     =        62                Population size   =  117,157,513
+                                              Design df         =           31
+
+──────────┬───────────
+1=white,  │
+2=black,  │
+3=other   │ proportion
+──────────┼───────────
+    White │      .8792
+    Black │      .0955
+    Other │      .0253
+          │ 
+    Total │          1
+──────────┴───────────
+  Key:  proportion  =  cell proportion
+
+. svy : prop race region
+(running proportion on estimation sample)
+
+Survey: Proportion estimation
+
+Number of strata =      31      Number of obs   =       10,351
+Number of PSUs   =      62      Population size =  117,157,513
+                                Design df       =           31
+
+─────────────┬────────────────────────────────────────────────
+             │             Linearized            Logit
+             │ Proportion   Std. Err.     [95% Conf. Interval]
+─────────────┼────────────────────────────────────────────────
+race         │
+       White │   .8791545    .016689      .8407837    .9092758
+       Black │   .0955059   .0127491      .0724809    .1248606
+       Other │   .0253396   .0105423      .0107686    .0584618
+─────────────┼────────────────────────────────────────────────
+region       │
+          NE │    .206883   .0056463       .195604    .2186355
+          MW │   .2489281   .0061995      .2364998    .2617855
+           S │   .2652914   .0103936      .2446411    .2870226
+           W │   .2788975   .0113751      .2562993    .3026773
+─────────────┴────────────────────────────────────────────────
+
+. estat effect
+
+─────────────┬────────────────────────────────────────────
+             │             Linearized
+             │ Proportion   Std. Err.       DEFF      DEFT
+─────────────┼────────────────────────────────────────────
+race         │
+       White │   .8791545    .016689     27.1334   5.20897
+       Black │   .0955059   .0127491     19.4744   4.41298
+       Other │   .0253396   .0105423     46.5754   6.82462
+─────────────┼────────────────────────────────────────────
+region       │
+          NE │    .206883   .0056463     2.01095   1.41808
+          MW │   .2489281   .0061995     2.12766   1.45865
+           S │   .2652914   .0103936     5.73631   2.39506
+           W │   .2788975   .0113751     6.65899    2.5805
+─────────────┴────────────────────────────────────────────
+</pre>
+<p>High design effects for race are produced by two design features. First, the cluster nature of the design interacted with racial segregation that was typical in the U.S. in 1980s when NHANES II data were collected. Apparently, geographic areas corresponding to clusters were relatively homogeneous with respect to race, producing high intraclass correlations (see slide 28). The lower design effect for the blacks is explained by oversampling: there were more blacks in the sample that would have been expected from a simple random sample. (Technically, sampling by race isn’t possible, as this information is not available on the frame; however, given the geographic segregation of the races, sample designers were able to achieve higher sample sizes of blacks by sampling <em>areas</em> where blacks tended to live at higher rates than the white areas.)</p>
+<p>Category population totals can be produced with <code>count</code> option:</p>
+<pre class='stata'>. svy : tab race, count
+(running tabulate on estimation sample)
+
+Number of strata   =        31                Number of obs     =       10,351
+Number of PSUs     =        62                Population size   =  117,157,513
+                                              Design df         =           31
+
+──────────┬───────────
+1=white,  │
+2=black,  │
+3=other   │      count
+──────────┼───────────
+    White │    1.0e+08
+    Black │    1.1e+07
+    Other │    3.0e+06
+          │ 
+    Total │    1.2e+08
+──────────┴───────────
+  Key:  count     =  weighted count
+
+. svy : tab race, count se
+(running tabulate on estimation sample)
+
+Number of strata   =        31                Number of obs     =       10,351
+Number of PSUs     =        62                Population size   =  117,157,513
+                                              Design df         =           31
+
+──────────┬───────────────────────
+1=white,  │
+2=black,  │
+3=other   │      count          se
+──────────┼───────────────────────
+    White │    1.0e+08     2.9e+06
+    Black │    1.1e+07     1.5e+06
+    Other │    3.0e+06     1.3e+06
+          │ 
+    Total │    1.2e+08            
+──────────┴───────────────────────
+  Key:  count     =  weighted count
+        se        =  linearized standard error of weighted count
+</pre>
+<p>The R bit: all estimation commands in <code>library(survey)</code> package have formula as the first argument and design object as the second argument. One-way tabulations are run with <code>svymean()</code> which produces the category indicators as needed.</p>
+<pre class='r'>> svymean(~highbp,design=nhanes2.svy)
+          mean     SE
+highbp 0.36854 0.0143
+> svymean(~as.factor(highbp),design=nhanes2.svy)
+                      mean     SE
+as.factor(highbp)0 0.63146 0.0143
+as.factor(highbp)1 0.36854 0.0143
+> svymean(~race,nhanes2.svy)
+              mean     SE
+raceWhite 0.879154 0.0167
+raceBlack 0.095506 0.0127
+raceOther 0.025340 0.0105
+> svymean(~race + region,nhanes2.svy)
+              mean     SE
+raceWhite 0.879154 0.0167
+raceBlack 0.095506 0.0127
+raceOther 0.025340 0.0105
+regionNE  0.206883 0.0056
+regionMW  0.248928 0.0062
+regionS   0.265291 0.0104
+regionW   0.278898 0.0114
+</pre>
+<p>Category population totals can be produced with <code>svytotal</code> function:</p>
+<pre class='r'>> svytotal(~race,nhanes2.svy)
+              total      SE
+raceWhite 102999549 2912042
+raceBlack  11189236 1458814
+raceOther   2968728 1252160
+</pre>
+<p>It may be worth looking a little bit deeper into how the survey commands work, and what they leave behind.</p>
+<p>Stata stores estimation result components: the coefficient estimates vector <code>e(b)</code> (whose components can be referred to as <code>_b[coefficient_name]</code>) and <code>e(V)</code>, as well the various bits of information on the design, such as the number of design degrees of freedom <code>e(df_r)</code>, estimate of the population size <code>e(N_pop)</code>, and others:</p>
+<pre class='stata'>. svy : prop race
+(running proportion on estimation sample)
+
+Survey: Proportion estimation
+
+Number of strata =      31      Number of obs   =       10,351
+Number of PSUs   =      62      Population size =  117,157,513
+                                Design df       =           31
+
+─────────────┬────────────────────────────────────────────────
+             │             Linearized            Logit
+             │ Proportion   Std. Err.     [95% Conf. Interval]
+─────────────┼────────────────────────────────────────────────
+race         │
+       White │   .8791545    .016689      .8407837    .9092758
+       Black │   .0955059   .0127491      .0724809    .1248606
+       Other │   .0253396   .0105423      .0107686    .0584618
+─────────────┴────────────────────────────────────────────────
+
+. matrix list e(b)
+
+e(b)[1,3]
+         race:      race:      race:
+        White      Black      Other
+y1  .87915445  .09550592  .02533963
+
+. matrix list e(V)
+
+symmetric e(V)[3,3]
+                  race:       race:       race:
+                 White       Black       Other
+race:White   .00027852
+race:Black  -.00016496   .00016254
+race:Other  -.00011356   2.421e-06   .00011114
+
+. ereturn list
+
+scalars:
+               e(df_r) =  31
+      e(N_strata_omit) =  0
+          e(singleton) =  0
+             e(census) =  0
+              e(N_pop) =  117157513
+              e(N_psu) =  62
+           e(N_strata) =  31
+             e(N_over) =  1
+                  e(N) =  10351
+             e(stages) =  1
+               e(k_eq) =  1
+               e(rank) =  2
+
+macros:
+            e(cmdline) : "svy : prop race"
+                e(cmd) : "proportion"
+             e(prefix) : "svy"
+            e(cmdname) : "proportion"
+            e(command) : "proportion race,"
+              e(title) : "Survey: Proportion estimation"
+            e(vcetype) : "Linearized"
+                e(vce) : "linearized"
+             e(label1) : "White Black Other"
+           e(namelist) : "White Black Other"
+          e(estat_cmd) : "svy_estat"
+            e(varlist) : "race"
+       e(marginsnotok) : "_ALL"
+              e(wtype) : "pweight"
+               e(wvar) : "finalwgt"
+               e(wexp) : "= finalwgt"
+         e(singleunit) : "missing"
+                e(su1) : "psu"
+            e(strata1) : "strata"
+         e(properties) : "b V"
+
+matrices:
+                  e(b) :  1 x 3
+                  e(V) :  3 x 3
+            e(_N_subp) :  1 x 3
+              e(V_srs) :  3 x 3
+                 e(_N) :  1 x 3
+              e(error) :  1 x 3
+  e(_N_strata_certain) :  1 x 1
+   e(_N_strata_single) :  1 x 1
+          e(_N_strata) :  1 x 1
+
+functions:
+             e(sample)   
+</pre>
+<p>Stata also allows to easily estimate the design effects for the latest estimated survey command:</p>
+<pre class='stata'>. estat effect
+
+─────────────┬────────────────────────────────────────────
+             │             Linearized
+             │ Proportion   Std. Err.       DEFF      DEFT
+─────────────┼────────────────────────────────────────────
+race         │
+       White │   .8791545    .016689     27.1334   5.20897
+       Black │   .0955059   .0127491     19.4744   4.41298
+       Other │   .0253396   .0105423     46.5754   6.82462
+─────────────┴────────────────────────────────────────────
+</pre>
+<p>A somewhat obscure exception is <code>svy: tabulate</code>. Stata pretends this is not an estimation command, but in fact it has most of the components. The estimates can be referred to as <code>_b[prc]</code> where <code>r</code> is the row and <code>c</code> is the column.</p>
+<pre class='stata'>. svy : tab race
+(running tabulate on estimation sample)
+
+Number of strata   =        31                Number of obs     =       10,351
+Number of PSUs     =        62                Population size   =  117,157,513
+                                              Design df         =           31
+
+──────────┬───────────
+1=white,  │
+2=black,  │
+3=other   │ proportion
+──────────┼───────────
+    White │      .8792
+    Black │      .0955
+    Other │      .0253
+          │ 
+    Total │          1
+──────────┴───────────
+  Key:  proportion  =  cell proportion
+
+. matrix list e(b)
+
+e(b)[1,3]
+          p11        p21        p31
+y1  .87915445  .09550592  .02533963
+
+. matrix list e(V)
+
+symmetric e(V)[3,3]
+            p11         p21         p31
+p11   .00027852
+p21  -.00016496   .00016254
+p31  -.00011356   2.421e-06   .00011114
+
+. ereturn list
+
+scalars:
+               e(df_r) =  31
+      e(N_strata_omit) =  0
+          e(singleton) =  0
+             e(census) =  0
+             e(stages) =  1
+                  e(N) =  10351
+           e(N_strata) =  31
+              e(N_psu) =  62
+              e(N_pop) =  117157513
+                  e(r) =  3
+                  e(c) =  1
+              e(total) =  117157513
+             e(mgdeff) =  .
+            e(cvgdeff) =  .
+               e(rank) =  2
+
+macros:
+            e(cmdline) : "svy : tab race"
+                e(cmd) : "tabulate"
+             e(prefix) : "svy"
+            e(cmdname) : "tabulate"
+       e(marginsnotok) : "_ALL"
+          e(estat_cmd) : "svy_estat"
+             e(rowlab) : "label"
+            e(rowvlab) : "1=white, 2=black, 3=other"
+             e(rowvar) : "race"
+             e(setype) : "cell"
+            e(vcetype) : "Linearized"
+                e(vce) : "linearized"
+              e(wtype) : "pweight"
+               e(wvar) : "finalwgt"
+               e(wexp) : "= finalwgt"
+         e(singleunit) : "missing"
+                e(su1) : "psu"
+            e(strata1) : "strata"
+         e(properties) : "b V"
+
+matrices:
+                  e(b) :  1 x 3
+                  e(V) :  3 x 3
+          e(V_srs_col) :  1 x 1
+           e(Deft_col) :  1 x 1
+           e(Deff_col) :  1 x 1
+          e(V_srs_row) :  3 x 3
+           e(Deft_row) :  1 x 3
+           e(Deff_row) :  1 x 3
+              e(V_srs) :  3 x 3
+               e(Deft) :  1 x 3
+               e(Deff) :  1 x 3
+              e(V_col) :  1 x 1
+              e(V_row) :  3 x 3
+                e(Col) :  1 x 1
+                e(Row) :  1 x 3
+               e(Prop) :  3 x 1
+                e(Obs) :  3 x 1
+  e(_N_strata_certain) :  1 x 1
+   e(_N_strata_single) :  1 x 1
+          e(_N_strata) :  1 x 1
+
+functions:
+             e(sample)   
+
+. lincom _b[p11]
+
+ ( 1)  p11 = 0
+
+─────────────┬────────────────────────────────────────────────────────────────
+        Mean │      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+─────────────┼────────────────────────────────────────────────────────────────
+         (1) │   .8791545    .016689    52.68   0.000      .845117    .9131919
+─────────────┴────────────────────────────────────────────────────────────────
+</pre>
+<p>In R, the best way to get the components of the survey estimation results out is by the corresponding class methods:</p>
+<pre class='r'>> svy.prop.race &lt;- svymean(~race,nhanes2.svy)
+> coef(svy.prop.race)
+ raceWhite  raceBlack  raceOther 
+0.87915445 0.09550592 0.02533963 
+> SE(svy.prop.race)
+ raceWhite  raceBlack  raceOther 
+0.01668898 0.01274910 0.01054229 
+> confint(svy.prop.race)
+                2.5 %     97.5 %
+raceWhite 0.846444648 0.91186425
+raceBlack 0.070518148 0.12049369
+raceOther 0.004677125 0.04600213
+</pre>
+<h2 id="two-way-tabulations">Two-way tabulations</h2>
+<p>The primary methodological complication with two-way tabulations is the distribution of the goodness of fit/independence test. (The null hypothesis is that the margins of the table are independent of one another.) With i.i.d. data, the asymptotic distribution of the Pearson test of the differences between expected and observed counts is <span class="math inline">\(\chi^2\)</span>. With survey data, the distribution is a sum of <span class="math inline">\(\chi^2_1\)</span>, with weights determined by the generalized design effects (eigenvalues of the diagonal matrix which is the product of the design-based variance-covariance matrix of estimated counts times the inverse of the SRS-based variance-covariance matrix). This is a non-standard distribution, with the most common approximation being the Satterthwaite moment approximation yielding a <span class="math inline">\(\chi^2\)</span> or an F distribution with fractional degrees of freedom.</p>
+<p>The Stata bit:</p>
+<pre class='stata'>. svy : tab highbp race
+(running tabulate on estimation sample)
+
+Number of strata   =        31                Number of obs     =       10,351
+Number of PSUs     =        62                Population size   =  117,157,513
+                                              Design df         =           31
+
+──────────┬───────────────────────────
+1 if BP > │
+140/90, 0 │ 1=white, 2=black, 3=other 
+otherwise │ White  Black  Other  Total
+──────────┼───────────────────────────
+        0 │ .5621  .0539  .0154  .6315
+        1 │  .317  .0416    .01  .3685
+          │ 
+    Total │ .8792  .0955  .0253      1
+──────────┴───────────────────────────
+  Key:  cell proportion
+
+  Pearson:
+    Uncorrected   chi2(2)         =   21.9850
+    Design-based  F(1.78, 55.29)  =    3.8756     P = 0.0309
+</pre>
+<p>Note the fractional degrees of freedom: 1.78 in the numerator, which is the approximation for two degrees of freedom that an i.i.d. Pearson test would have had; and 55.29 which is a midpoint of kinds between the design degrees of freedom, 31, and the nominal sample size, 10351. Uncorrected chi-square is useless.</p>
+<p>The column/row proportions can be easily requested with the <code>col</code> or <code>row</code> options:</p>
+<pre class='stata'>. * with column proportions
+. svy : tab highbp race, col se
+(running tabulate on estimation sample)
+
+Number of strata   =        31                Number of obs     =       10,351
+Number of PSUs     =        62                Population size   =  117,157,513
+                                              Design df         =           31
+
+──────────┬───────────────────────────────────
+1 if BP > │
+140/90, 0 │     1=white, 2=black, 3=other     
+otherwise │   White    Black    Other    Total
+──────────┼───────────────────────────────────
+        0 │   .6394    .5649     .607    .6315
+          │ (.0153)  (.0212)  (.0569)  (.0143)
+          │ 
+        1 │   .3606    .4351     .393    .3685
+          │ (.0153)  (.0212)  (.0569)  (.0143)
+          │ 
+    Total │       1        1        1        1
+          │                                   
+──────────┴───────────────────────────────────
+  Key:  column proportion
+        (linearized standard error of column proportion)
+
+  Pearson:
+    Uncorrected   chi2(2)         =   21.9850
+    Design-based  F(1.78, 55.29)  =    3.8756     P = 0.0309
+
+. * with row proportions
+. svy : tab highbp race, row se
+(running tabulate on estimation sample)
+
+Number of strata   =        31                Number of obs     =       10,351
+Number of PSUs     =        62                Population size   =  117,157,513
+                                              Design df         =           31
+
+──────────┬───────────────────────────────────
+1 if BP > │
+140/90, 0 │     1=white, 2=black, 3=other     
+otherwise │   White    Black    Other    Total
+──────────┼───────────────────────────────────
+        0 │   .8902    .0854    .0244        1
+          │ (.0144)  (.0113)  (.0083)         
+          │ 
+        1 │   .8602    .1128     .027        1
+          │ (.0222)  (.0166)  (.0147)         
+          │ 
+    Total │   .8792    .0955    .0253        1
+          │ (.0167)  (.0127)  (.0105)         
+──────────┴───────────────────────────────────
+  Key:  row proportion
+        (linearized standard error of row proportion)
+
+  Pearson:
+    Uncorrected   chi2(2)         =   21.9850
+    Design-based  F(1.78, 55.29)  =    3.8756     P = 0.0309
+</pre>
+<p>Totals can be requested with the <code>count</code> option (some degree of formatting may be recommended for large numbers; <code>format(%9.0fc)</code> requests nine digits, with millions and thousands separated by commas, and no digits after the decimal point):</p>
+<pre class='stata'>. svy : tab highbp race, count se format(%9.0fc)
+(running tabulate on estimation sample)
+
+Number of strata   =        31                Number of obs     =       10,351
+Number of PSUs     =        62                Population size   =  117,157,513
+                                              Design df         =           31
+
+──────────┬───────────────────────────────────────────────────
+1 if BP > │
+140/90, 0 │             1=white, 2=black, 3=other             
+otherwise │       White        Black        Other        Total
+──────────┼───────────────────────────────────────────────────
+        0 │    65857812    6,320,329    1,801,870     73980011
+          │ (2,435,627)    (810,099)    (623,099)  (2,275,480)
+          │ 
+        1 │    37141737    4,868,907    1,166,858     43177502
+          │ (1,902,231)    (721,110)    (641,748)  (1,898,804)
+          │ 
+    Total │   102999549     11189236    2,968,728    117157513
+          │ (2,912,042)  (1,458,814)  (1,252,160)             
+──────────┴───────────────────────────────────────────────────
+  Key:  weighted count
+        (linearized standard error of weighted count)
+
+  Pearson:
+    Uncorrected   chi2(2)         =   21.9850
+    Design-based  F(1.78, 55.29)  =    3.8756     P = 0.0309
+</pre>
+<p>The R bit:</p>
+<pre class='r'>> svytable(~highbp+race,nhanes2.svy)
+      race
+highbp    White    Black    Other
+     0 65857812  6320329  1801870
+     1 37141737  4868907  1166858
+</pre>
+<p>The results are reported on the scale of weighted totals. The <span class="math inline">\(\chi^2\)</span> statistic needs to be requested separately:</p>
+<pre class='r'>> svychisq(~highbp+race,nhanes2.svy)
+
+	Pearson's X^2: Rao &amp; Scott adjustment
+
+data:  svychisq(~highbp + race, nhanes2.svy)
+F = 3.8756, ndf = 1.7836, ddf = 55.2930, p-value = 0.0309
+</pre>
+<p>The <code>survey</code> package in R provides for a variety of ways to compute the tail probabilities of the asymptotic distribution of the goodness of fit/independence test.</p>
+<pre class='r'>> for(st in c("F",  "Chisq","Wald","adjWald","saddlepoint")) {
++   cat("Statistic option = ",st,"\n")
++   print(svychisq(~highbp+race,nhanes2.svy,stat=st))
++ }
+Statistic option =  F 
+
+	Pearson's X^2: Rao &amp; Scott adjustment
+
+data:  svychisq(~highbp + race, nhanes2.svy, stat = st)
+F = 3.8756, ndf = 1.7836, ddf = 55.2930, p-value = 0.0309
+
+Statistic option =  Chisq 
+
+	Pearson's X^2: Rao &amp; Scott adjustment
+
+data:  svychisq(~highbp + race, nhanes2.svy, stat = st)
+X-squared = 21.985, df = 2, p-value = 0.02074
+
+Statistic option =  Wald 
+
+	Design-based Wald test of association
+
+data:  svychisq(~highbp + race, nhanes2.svy, stat = st)
+F = 4.293, ndf = 2, ddf = 31, p-value = 0.02261
+
+Statistic option =  adjWald 
+
+	Design-based Wald test of association
+
+data:  svychisq(~highbp + race, nhanes2.svy, stat = st)
+F = 4.1545, ndf = 2, ddf = 30, p-value = 0.02554
+
+Statistic option =  saddlepoint 
+
+	Pearson's X^2: saddlepoint approximation
+
+data:  svychisq(~highbp + race, nhanes2.svy, stat = st)
+X-squared = 21.985, p-value = 0.03144
+</pre>
+<p>Note that the Stata results are reproduced by <code>svychisq(...,statistic=&quot;F&quot;)</code> specification.</p>
+<p>If you need the tabulation in terms of cell proportions, <code>svymean</code> with <code>~interaction()</code> formula can be used:</p>
+<pre class='r'>> (svyxtab &lt;- svymean(~interaction(highbp,race),nhanes2.svy))
+                                      mean     SE
+interaction(highbp, race)0.White 0.5621305 0.0172
+interaction(highbp, race)1.White 0.3170239 0.0148
+interaction(highbp, race)0.Black 0.0539473 0.0070
+interaction(highbp, race)1.Black 0.0415586 0.0063
+interaction(highbp, race)0.Other 0.0153799 0.0052
+interaction(highbp, race)1.Other 0.0099597 0.0054
+> ftable(svyxtab,rownames=list(highbp=c("Normal BP","Hypertonic"),race=c("White","Black","Other")))
+           highbp   Normal BP  Hypertonic
+race                                     
+White mean        0.562130505 0.317023945
+      SE          0.017198435 0.014771874
+Black mean        0.053947279 0.041558641
+      SE          0.007021651 0.006324266
+Other mean        0.015379893 0.009959737
+      SE          0.005234244 0.005419017
+</pre>
+<p>Finally, for the row proportions, the best choice is <code>svyby()</code> function which acts in <code>apply</code>-like fashion over subsets of the data:</p>
+<pre class='r'>> svyby(~highbp,by=~race,design=nhanes2.svy,FUN=svymean)
+       race    highbp         se
+White White 0.3606010 0.01534364
+Black Black 0.4351420 0.02118878
+Other Other 0.3930498 0.05689304
+> svyby(~as.factor(highbp),by=~race,design=nhanes2.svy,FUN=svymean)
+       race as.factor(highbp)0 as.factor(highbp)1 se.as.factor(highbp)0
+White White          0.6393990          0.3606010            0.01534364
+Black Black          0.5648580          0.4351420            0.02118878
+Other Other          0.6069502          0.3930498            0.05689304
+      se.as.factor(highbp)1
+White            0.01534364
+Black            0.02118878
+Other            0.05689304
+> svyby(~as.factor(highbp),by=~race,design=nhanes2.svy,FUN=svymean)[,1:3]
+       race as.factor(highbp)0 as.factor(highbp)1
+White White          0.6393990          0.3606010
+Black Black          0.5648580          0.4351420
+Other Other          0.6069502          0.3930498
+</pre>
+<h2 id="summaries-for-continuous-variables">Summaries for continuous variables</h2>
+<p>Stata bit: moments can be estimated using <code>mean</code>:</p>
+<pre class='stata'>. svy : mean bpsystol bpdiast
+(running mean on estimation sample)
+
+Survey: Mean estimation
+
+Number of strata =      31      Number of obs   =       10,351
+Number of PSUs   =      62      Population size =  117,157,513
+                                Design df       =           31
+
+─────────────┬────────────────────────────────────────────────
+             │             Linearized
+             │       Mean   Std. Err.     [95% Conf. Interval]
+─────────────┼────────────────────────────────────────────────
+    bpsystol │   126.9458    .603462       125.715    128.1766
+     bpdiast │   81.01726   .5090314      79.97909    82.05544
+─────────────┴────────────────────────────────────────────────
+
+. estat effect
+
+─────────────┬────────────────────────────────────────────
+             │             Linearized
+             │       Mean   Std. Err.       DEFF      DEFT
+─────────────┼────────────────────────────────────────────
+    bpsystol │   126.9458    .603462     8.23048   2.86888
+     bpdiast │   81.01726   .5090314     16.3866   4.04803
+─────────────┴────────────────────────────────────────────
+
+. matrix list e(V)
+
+symmetric e(V)[2,2]
+           bpsystol    bpdiast
+bpsystol  .36416636
+ bpdiast  .26698712  .25911292
+</pre>
+<p>As covariances between estimates are properly computed, contrasts and other linear combinations can be produced with <code>lincom</code> command:</p>
+<pre class='stata'>. lincom bpsystol - bpdiast
+
+ ( 1)  bpsystol - bpdiast = 0
+
+─────────────┬────────────────────────────────────────────────────────────────
+        Mean │      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+─────────────┼────────────────────────────────────────────────────────────────
+         (1) │   45.92852   .2988395   153.69   0.000     45.31903    46.53801
+─────────────┴────────────────────────────────────────────────────────────────
+</pre>
+<p>Distribution histogram:</p>
+<pre class='stata'>. hist bmi [fw=finalwgt]
+(bin=80, start=12.385596, width=.60930125)
+
+. graph export bmi_hist_s.png, width(1200) replace
+(file bmi_hist_s.png written in PNG format)
+</pre>
+<figure>
+<img src="bmi_hist_s.png" alt="Stata histogram of BMI" /><figcaption>Stata histogram of BMI</figcaption>
+</figure>
+<p>R bit:</p>
+<pre class='r'>> svymean(~bpsystol+bpdiast,nhanes2.svy)
+            mean     SE
+bpsystol 126.946 0.6035
+bpdiast   81.017 0.5090
+> vcov(svymean(~bpsystol+bpdiast,nhanes2.svy))
+          bpsystol   bpdiast
+bpsystol 0.3641664 0.2669871
+bpdiast  0.2669871 0.2591129
+> svycontrast(svymean(~bpsystol+bpdiast,nhanes2.svy),contrast=c(1,-1))
+         contrast     SE
+contrast   45.929 0.2988
+</pre>
+<p>Distribution histogram (in base R graphics):</p>
+<pre class='r'>> svyhist(~bmi,nhanes2.svy)
+> # png(filename="bmi_hist_r.png",res=72)
+</pre>
+<figure>
+<img src="bmi_hist_r.png" alt="R histogram of BMI" /><figcaption>R histogram of BMI</figcaption>
+</figure>
+<h2 id="quantiles-and-cdfs">Quantiles and CDFs</h2>
+<p>In terms of survey statistics, a cdf is a gynormous infinite collection of proportion estimates. Quantiles are even worse; they are defined by estimating equations <span class="math display">\[
+    \theta_p : \mathbf{E} 1\{ X \le \theta_p \} = p
+\]</span> Getting standard errors for these requires inverting the non-smooth step function, which has a host of technical difficulties concering regularity conditions on the sampling design.</p>
+<p>In Stata, no standard tools for the job are available. Here’s reasonably efficient code to produce the CDF.</p>
+<pre class='stata'>. duplicates report bmi
+
+Duplicates in terms of bmi
+
+──────────┬───────────────────────────
+   copies │ observations       surplus
+──────────┼───────────────────────────
+        1 │         9542             0
+        2 │          776           388
+        3 │           33            22
+──────────┴───────────────────────────
+
+. * since there are ties in BMI, need to process groups rather than individual observations
+. egen _bmi_grp_sumw = sum( finalwgt ), by( bmi )
+
+. * tag the first observation per group of identical BMIs
+. bysort bmi (sampl) : gen _bmi_tag = (_n==1)
+
+. * sum of weights
+. sum finalwgt
+
+    Variable │        Obs        Mean    Std. Dev.       Min        Max
+─────────────┼─────────────────────────────────────────────────────────
+    finalwgt │     10,351    11318.47     7304.04       2000      79634
+
+. * create a cdf = running sum / sum of weights
+. gen bmi_cdf = sum( _bmi_grp_sumw*_bmi_tag ) / r(sum)
+
+. * check this is between 0 and 1
+. assert inrange(bmi_cdf,0,1)
+
+. * look at some examples
+. list *bmi* in 1/10
+
+     ┌────────────────────────────────────────────┐
+     │      bmi   _bmi_g~w   _bmi_tag     bmi_cdf │
+     ├────────────────────────────────────────────┤
+  1. │  12.3856       3602          1   .00003074 │
+  2. │  14.1351       3101          1   .00005721 │
+  3. │  14.3858       3814          1   .00008977 │
+  4. │ 14.42802       6431          1   .00014466 │
+  5. │ 14.85291       4623          1   .00018412 │
+     ├────────────────────────────────────────────┤
+  6. │ 14.91436      32226          1   .00045919 │
+  7. │ 15.35931      11707          1   .00055911 │
+  8. │ 15.36715       7572          1   .00062374 │
+  9. │ 15.39042       8106          1   .00069293 │
+ 10. │ 15.39201       9078          1   .00077042 │
+     └────────────────────────────────────────────┘
+
+. list *bmi* in -10/l
+
+       ┌────────────────────────────────────────────┐
+       │      bmi   _bmi_g~w   _bmi_tag     bmi_cdf │
+       ├────────────────────────────────────────────┤
+10342. │ 51.80983       4662          1   .99921589 │
+10343. │ 52.71384      10341          1   .99930416 │
+10344. │ 53.04031      13831          1   .99942221 │
+10345. │ 53.18431       3247          1   .99944993 │
+10346. │ 53.26417       9854          1   .99953404 │
+       ├────────────────────────────────────────────┤
+10347. │ 53.84639      10331          1   .99962222 │
+10348. │ 54.05056       8467          1   .99969449 │
+10349. │ 55.43552       8078          1   .99976344 │
+10350. │ 57.10803      18775          1   .99992369 │
+10351. │  61.1297       8940          1           1 │
+       └────────────────────────────────────────────┘
+
+. * restore sort order, just in case
+. sort sampl
+
+. * clean up the variables we no longer need
+. drop _bmi_grp_sumw _bmi_tag
+
+. * plot the CDF
+. label variable bmi_cdf "CDF of BMI"
+
+. line bmi_cdf bmi, sort
+
+. graph export bmi_cdf_s.png, width(1200) replace
+(file bmi_cdf_s.png written in PNG format)
+</pre>
+<figure>
+<img src="bmi_cdf_s.png" alt="Stata CDF plot" /><figcaption>Stata CDF plot</figcaption>
+</figure>
+<p>Estimation of percentiles accounting for the complex survey design is accomplished by user-written command <code>epctile</code>:</p>
+<pre class='stata'>. epctile bmi, svy p(25 50 75)
+
+Percentile estimation
+─────────────┬────────────────────────────────────────────────────────────────
+             │             Linearized
+         bmi │      Coef.   Std. Err.      z    P>|z|     [95% Conf. Interval]
+─────────────┼────────────────────────────────────────────────────────────────
+         p25 │   21.94858   .0554142   396.08   0.000     21.83997    22.05719
+         p50 │   24.53695   .0877981   279.47   0.000     24.36487    24.70903
+         p75 │   27.69776   .1206684   229.54   0.000     27.46125    27.93427
+─────────────┴────────────────────────────────────────────────────────────────
+</pre>
+<p>R bit: in R, everything is appropriately internalized by the <code>survey</code> package:</p>
+<pre class='r'>> bmi.cdf &lt;- svycdf(~bmi,nhanes2.svy)
+> plot(bmi.cdf)
+> # export the graph -- not sure if works
+> # png(filename="bmi_hist_r.png",res=72)
+> svyquantile(~bmi,nhanes2.svy,c(0.25,0.5,0.75))
+        0.25      0.5    0.75
+bmi 21.94844 24.53522 27.6975
+</pre>
+<figure>
+<img src="bmi_cdf_r.png" alt="R CDF plot" /><figcaption>R CDF plot</figcaption>
+</figure>
+<h2 id="singleton-psus">Singleton PSUs</h2>
+<p>A complication that is very particular to the analysis of survey data is that of single PSU per stratum. If you study the variance expression on slide 25 of the handouts, you will see that when n<sub>h</sub> is 1, then the variance has the form of 0/0: in the numerator, the stratum mean is equal to the mean in the single unit in that stratum, while the denominator has n<sub>h</sub>-1=0. It appears appropriate that variance estimation procedures produce a reasonably informative error.</p>
+<p>By default, Stata produces a missing standard error:</p>
+<pre class='stata'>. svy  : mean hdresult
+(running mean on estimation sample)
+
+Survey: Mean estimation
+
+Number of strata =      31       Number of obs   =       8,720
+Number of PSUs   =      60       Population size =  98,725,345
+                                 Design df       =          29
+
+─────────────┬────────────────────────────────────────────────
+             │             Linearized
+             │       Mean   Std. Err.     [95% Conf. Interval]
+─────────────┼────────────────────────────────────────────────
+    hdresult │   49.67141          .             .           .
+─────────────┴────────────────────────────────────────────────
+Note: Missing standard error because of stratum with single
+      sampling unit.
+</pre>
+<p>Note the message at the bottom. The issue can be further explored with <code>svydescribe</code>:</p>
+<pre class='stata'>. svydescribe if e(sample), single
+
+Survey: Describing strata with a single sampling unit in stage 1
+
+      pweight: finalwgt
+          VCE: linearized
+  Single unit: missing
+     Strata 1: strata
+         SU 1: psu
+        FPC 1: &lt;zero>
+
+                                      #Obs per Unit
+                              ────────────────────────────
+Stratum    #Units     #Obs      min       mean      max   
+────────  ────────  ────────  ────────  ────────  ────────
+       1         1*      114       114     114.0       114
+       2         1*       98        98      98.0        98
+────────  ────────  ────────  ────────  ────────  ────────
+                 2
+</pre>
+<p>Stata identified and reported 2 strata in which only one PSU with nonmissing <code>hdresult</code> data were available. (Substantively, NHANES II uses both self-reported data and, more importantly, the biospecimen measurements and instrument data. If the equipment is malfunctioning, the problem may affect the whole cluster where the data are collected over a period of several weeks.)</p>
+<p>R appears to gloss over the issue in this situation:</p>
+<pre class='r'>> svymean(~hdresult,nhanes2.svy,na.rm=TRUE)
+           mean     SE
+hdresult 49.671 0.3838
+</pre>
+<p>This behavior seems to be equivalent to the following specificaiton in Stata, where <code>subpop()</code> option is discussed in the next section.</p>
+<pre class='stata'>. svy , subpop(if !missing(hdresult)) : mean hdresult
+(running mean on estimation sample)
+
+Survey: Mean estimation
+
+Number of strata =      31      Number of obs   =       10,351
+Number of PSUs   =      62      Population size =  117,157,513
+                                Subpop. no. obs =        8,720
+                                Subpop. size    =   98,725,345
+                                Design df       =           31
+
+─────────────┬────────────────────────────────────────────────
+             │             Linearized
+             │       Mean   Std. Err.     [95% Conf. Interval]
+─────────────┼────────────────────────────────────────────────
+    hdresult │   49.67141   .3838218       48.8886    50.45422
+─────────────┴────────────────────────────────────────────────
+</pre>
+<p>That is to say, in the original example with missing standard errors, Stata applied the casewise deletion within the <code>mean</code> commmand itself, presenting <code>svy</code> with a deficient data set that had singleton PSUs. The second specification, however, starts by subsetting the data in the way that is appropriate for <code>svy</code>, and then providing the thus filtered subset to the <code>mean</code> command. In R, <code>survey::svymean()</code> does the latter in a natural way.</p>
+<h2 id="subpopulationsdomains">Subpopulations/domains</h2>
+<p>Estimation of subpopulations/domains presents additional challenges, as the sample sizes are random variables, and that randomness needs to be taken into account. Restricting the data set first, and then running survey estimation, may produce weird results, including singleton PSU discussed above that would be carved out by the domain.</p>
+<p>The Stata bit: use <code>svy, subpop():</code> option (note that it goes before the colon), or use <code>over()</code> option of the estimation commands if estimates for all domains defined by a categorical variable are needed. The results are numerically identical.</p>
+<pre class='stata'>. svy, subpop(if race==2): prop highbp
+(running proportion on estimation sample)
+
+Survey: Proportion estimation
+
+Number of strata =      30      Number of obs   =       10,013
+Number of PSUs   =      60      Population size =  113,415,086
+                                Subpop. no. obs =        1,086
+                                Subpop. size    =   11,189,236
+                                Design df       =           30
+
+─────────────┬────────────────────────────────────────────────
+             │             Linearized            Logit
+             │ Proportion   Std. Err.     [95% Conf. Interval]
+─────────────┼────────────────────────────────────────────────
+highbp       │
+           0 │    .564858   .0211888      .5211989    .6075337
+           1 │    .435142   .0211888      .3924663    .4788011
+─────────────┴────────────────────────────────────────────────
+Note: 1 stratum omitted because it contains no subpopulation
+      members.
+
+. svy : prop highbp, over(race)
+(running proportion on estimation sample)
+
+Survey: Proportion estimation
+
+Number of strata =      31      Number of obs   =       10,351
+Number of PSUs   =      62      Population size =  117,157,513
+                                Design df       =           31
+
+      _prop_1: highbp = 0
+      _prop_2: highbp = 1
+
+        White: race = White
+        Black: race = Black
+        Other: race = Other
+
+─────────────┬────────────────────────────────────────────────
+             │             Linearized            Logit
+        Over │ Proportion   Std. Err.     [95% Conf. Interval]
+─────────────┼────────────────────────────────────────────────
+_prop_1      │
+       White │    .639399   .0153436      .6075518    .6700653
+       Black │    .564858   .0211888      .5212582     .607477
+       Other │   .6069502    .056893      .4870329    .7152256
+─────────────┼────────────────────────────────────────────────
+_prop_2      │
+       White │    .360601   .0153436      .3299347    .3924482
+       Black │    .435142   .0211888       .392523    .4787418
+       Other │   .3930498    .056893      .2847744    .5129671
+─────────────┴────────────────────────────────────────────────
+
+. estat effect
+
+      _prop_1: highbp = 0
+      _prop_2: highbp = 1
+
+        White: race = White
+        Black: race = Black
+        Other: race = Other
+
+─────────────┬────────────────────────────────────────────
+             │             Linearized
+        Over │ Proportion   Std. Err.       DEFF      DEFT
+─────────────┼────────────────────────────────────────────
+_prop_1      │
+       White │    .639399   .0153436     9.29102   3.04812
+       Black │    .564858   .0211888     1.80556   1.34371
+       Other │   .6069502    .056893     3.55843   1.88638
+─────────────┼────────────────────────────────────────────
+_prop_2      │
+       White │    .360601   .0153436     9.29102   3.04812
+       Black │    .435142   .0211888     1.80556   1.34371
+       Other │   .3930498    .056893     3.55843   1.88638
+─────────────┴────────────────────────────────────────────
+</pre>
+<p>The R bit: estimation for subpopulations/domains is carried out by <code>svyby()</code>, which was used earlier in the context of cross-tabulations.</p>
+<pre class='r'>> svyby(~highbp,by=~race,design=nhanes2.svy,FUN=svymean)
+       race    highbp         se
+White White 0.3606010 0.01534364
+Black Black 0.4351420 0.02118878
+Other Other 0.3930498 0.05689304
+</pre>
+<h2 id="linear-models">Linear models</h2>
+<p>The Stata bit: provide <code>svy</code> prefix; you can use <code>test</code> command to tests coefficients, as with the “flat” regression.</p>
+<pre class='stata'>. svy : regress bmi i.race age sex
+(running regress on estimation sample)
+
+Survey: Linear regression
+
+Number of strata   =        31                Number of obs     =       10,351
+Number of PSUs     =        62                Population size   =  117,157,513
+                                              Design df         =           31
+                                              F(   4,     28)   =        77.49
+                                              Prob > F          =       0.0000
+                                              R-squared         =       0.0468
+
+─────────────┬────────────────────────────────────────────────────────────────
+             │             Linearized
+         bmi │      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+─────────────┼────────────────────────────────────────────────────────────────
+        race │
+      Black  │   1.508008   .2733876     5.52   0.000     .9504307    2.065586
+      Other  │  -.9962176     .28264    -3.52   0.001    -1.572666   -.4197695
+             │
+         age │    .059249   .0043204    13.71   0.000     .0504376    .0680605
+         sex │  -.4500342   .1256996    -3.58   0.001    -.7064001   -.1936682
+       _cons │   23.33798   .2707075    86.21   0.000     22.78586    23.89009
+─────────────┴────────────────────────────────────────────────────────────────
+
+. testparm i.race
+
+Adjusted Wald test
+
+ ( 1)  2.race = 0
+ ( 2)  3.race = 0
+
+       F(  2,    30) =   27.70
+            Prob > F =    0.0000
+
+. estat effect
+
+─────────────┬────────────────────────────────────────────
+             │             Linearized
+         bmi │      Coef.   Std. Err.       DEFF      DEFT
+─────────────┼────────────────────────────────────────────
+        race │
+      Black  │   1.508008   .2733876     2.03561   1.42675
+      Other  │  -.9962176     .28264     1.14289   1.06906
+             │
+         age │    .059249   .0043204     2.19004   1.47988
+         sex │  -.4500342   .1256996     1.90674   1.38085
+       _cons │   23.33798   .2707075     2.21886   1.48958
+─────────────┴────────────────────────────────────────────
+</pre>
+<p>The R bit:</p>
+<pre class='r'>> (bmi.reg &lt;- svyglm(bmi~race+age+sex,nhanes2.svy))
+Stratified 1 - level Cluster Sampling design (with replacement)
+With (62) clusters.
+svydesign(~psu, nest = TRUE, strata = ~strata, weights = ~finalwgt, 
+    data = nhanes2)
+
+Call:  svyglm(formula = bmi ~ race + age + sex, nhanes2.svy)
+
+Coefficients:
+(Intercept)    raceBlack    raceOther          age    sexFemale  
+   22.88794      1.50801     -0.99622      0.05925     -0.45003  
+
+Degrees of Freedom: 10350 Total (i.e. Null);  27 Residual
+Null Deviance:	    238800 
+Residual Deviance: 227600 	AIC: 63400
+> regTermTest(bmi.reg,"race")
+Wald test for race
+ in svyglm(formula = bmi ~ race + age + sex, nhanes2.svy)
+F =  28.62017  on  2  and  27  df: p= 2.1325e-07 
+</pre>
+<p>Rather disturbingly, R and Stata disagree on the intercept. In Stata, the intercept was 23.337976. In R, the intercept was 22.88794. There also differences in how the two packages deal with the denominator degrees of freedom of the restriction test: Stata uses design degrees of freedom minus the number of tested parameters, while R, arguably more appropriately, uses residual degrees of freedom (the design degrees of freedom minus the number of estimated parameters).</p>
+<p>Regression diagnostics, such as influential points, should account for the idiosyncracies of complex survey data analysis, such as use of weights in defining residuals, or the risks of producing singleton PSUs when producing leave-one-out diagnostics. This is currently an area of active methodological research; see <code>library(svydiags)</code> in R.</p>
+<h2 id="logistic-regression-models">Logistic regression models</h2>
+<p>The Stata bit:</p>
+<pre class='stata'>. svy : logit highbp i.race age sex
+(running logit on estimation sample)
+
+Survey: Logistic regression
+
+Number of strata   =        31                Number of obs     =       10,351
+Number of PSUs     =        62                Population size   =  117,157,513
+                                              Design df         =           31
+                                              F(   4,     28)   =       304.47
+                                              Prob > F          =       0.0000
+
+─────────────┬────────────────────────────────────────────────────────────────
+             │             Linearized
+      highbp │      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+─────────────┼────────────────────────────────────────────────────────────────
+        race │
+      Black  │   .5066832   .1056815     4.79   0.000     .2911443    .7222221
+      Other  │    .247894    .172019     1.44   0.160    -.1029411    .5987291
+             │
+         age │   .0516426   .0016622    31.07   0.000     .0482526    .0550326
+         sex │  -.6048808   .0570419   -10.60   0.000    -.7212185   -.4885431
+       _cons │  -1.937109   .1504897   -12.87   0.000    -2.244035   -1.630183
+─────────────┴────────────────────────────────────────────────────────────────
+
+. testparm i.race
+
+Adjusted Wald test
+
+ ( 1)  [highbp]2.race = 0
+ ( 2)  [highbp]3.race = 0
+
+       F(  2,    30) =   11.15
+            Prob > F =    0.0002
+</pre>
+<p>Stata can report Archer-Lemeshow goodness of fit test for this regression (the survey-corrected analogue of Hosmer-Lemeshow test):</p>
+<pre class='stata'>. estat gof
+
+Logistic model for highbp, goodness-of-fit test
+
+                      F(9,23) =         5.97
+                     Prob > F =         0.0003
+</pre>
+<p>The R bit: provide <code>family=binomial()</code> parameter of <code>svyglm</code>.</p>
+<pre class='r'>> (logit.highbp &lt;- svyglm(highbp ~ race+age+sex,nhanes2.svy,family=binomial()))
+Stratified 1 - level Cluster Sampling design (with replacement)
+With (62) clusters.
+svydesign(~psu, nest = TRUE, strata = ~strata, weights = ~finalwgt, 
+    data = nhanes2)
+
+Call:  svyglm(formula = highbp ~ race + age + sex, nhanes2.svy, family = binomial())
+
+Coefficients:
+(Intercept)    raceBlack    raceOther          age    sexFemale  
+   -2.54199      0.50668      0.24789      0.05164     -0.60488  
+
+Degrees of Freedom: 10350 Total (i.e. Null);  27 Residual
+Null Deviance:	    13630 
+Residual Deviance: 12100 	AIC: 12060
+> regTermTest(logit.highbp,"race")
+Wald test for race
+ in svyglm(formula = highbp ~ race + age + sex, nhanes2.svy, family = binomial())
+F =  11.52524  on  2  and  27  df: p= 0.00024066 
+</pre>
+<p>Rather disturbingly, R and Stata disagree on the intercept. In Stata, the intercept was -1.9371087. In R, the intercept was -2.54199. There also differences in how the two packages deal with the denominator degrees of freedom of the restriction test: Stata uses design degrees of freedom minus the number of tested parameters, while R, arguably more appropriately, uses residual degrees of freedom (the design degrees of freedom minus the number of estimated parameters).</p>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<p>In Stata, the most common problem will likely be the lack of support by <code>svy</code> of your favorite command. For instance, correlation is not going to work, because Stata treats it as a descriptive rather than as an estimation command:</p>
+<pre class='stata'>. capture noisily svy : corr bpsystol bpdiast
+correlate is not supported by svy with vce(linearized); see help svy estimation for a list of Stata estimation commands that
+are supported by svy
+</pre>
+<p>You will also encounter missing standard errors because of singleton PSUs from time to time; these would either be consequences of missing data, or an incorrect use of <code>if</code> restriction in the command after the colon (instead of the part of <code>subpop()</code> option of <code>svy</code> before the colon).</p>
+<p>In R, the common problems may include:</p>
+<ol type="1">
+<li>missing data in the analysis variables: the <code>survey</code> package freaks out right away, which can be overriden with the standard <code>na.rm=TRUE</code> option of most command:</li>
+</ol>
+<pre class='r'>> svymean(~hdresult,nhanes2.svy)
+         mean SE
+hdresult   NA NA
+> svymean(~hdresult,nhanes2.svy,na.rm=TRUE)
+           mean     SE
+hdresult 49.671 0.3838
+</pre>
+<ol start="2" type="1">
+<li>Giving the variable name without the formula <code>~</code>:</li>
+</ol>
+<pre class='r'>> # don't:
+> # svymean(highbp,nhanes2.svy)
+> svymean(~highbp,nhanes2.svy)
+          mean     SE
+highbp 0.36854 0.0143
+</pre>
+<ol start="3" type="1">
+<li>Trying to provide the raw data rather than the complex survey design object:</li>
+</ol>
+<pre class='r'>> # don't:
+> # svymean(highbp,data=nhanes2)
+> svymean(~highbp,design=nhanes2.svy)
+          mean     SE
+highbp 0.36854 0.0143
+</pre>
+<p>Of course, the greatest user error would be analysis without survey specifications. As discussed in the workshop presentation, slides 26–30, both point estimates and standard errors are most likely to be wrong when the complex survey design features are ignored in the analysis.</p>
+<h2 id="references">References</h2>
+<p>References for the course are assembled at <a href="http://www.citeulike.org/user/ctacmo/tag/ichps2018" class="uri">http://www.citeulike.org/user/ctacmo/tag/ichps2018</a>.</p>
+<h2 id="contact">Contact</h2>
+<p>Stas Kolenikov, skolenik at gmail.</p>
+<h2 id="markdown">Markdown</h2>
+<p>This tutorial was prepared using Germán Rodríguez’ <code>markstat</code> Stata command that can produce dynamic documents that combine both R and Stata code using basic markdown formatting. See <a href="http://data.princeton.edu/stata/markdown">Stata markdown webpage</a>. R has an independent implementation of markdown via <a href="https://rmarkdown.rstudio.com"><code>rmarkdown</code> package</a>.</p>
+<p>To reproduce in Stata:</p>
+<ol type="1">
+<li><p>Install <code>markstat</code> and <code>whereis</code> packages by Germán Rodríguez (<code>findit markstat</code> and follow instructions).</p></li>
+<li><p><a href="http://pandoc.org/installing">Install Pandoc</a>.</p></li>
+<li><p>Inform Stata where Pandoc and R are located (<code>whereis pandoc *path_to_pandoc.exe*</code> and <code>whereis R *path_to_R.exe*</code>).</p></li>
+<li><p>If that is done, <code>markstat using survey-ichps2018.stmd, mathjax</code> should produce a viewable <code>survey-ichps2018.html</code> file.</p></li>
+</ol>
+</body>
+</html>

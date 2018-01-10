@@ -1,0 +1,548 @@
+# Analysis of Complex Health Survey Data
+# ICHPS 2018
+
+This tutorial will provide some examples of analysis of complex survey
+data using both Stata and R code, with parallel examples to the extent
+that functionality is similar between the two.
+
+## Source data
+
+We will be using an excerpt from NHANES II that is distributed by Stata Corp.
+to run their survey examples off. I am using the locally stored file;
+a stable url for the file is 
+[http://www.stata-press.com/data/r12/nhanes2.dta](http://www.stata-press.com/data/r12/nhanes2.dta).
+
+The Stata bit:
+
+```s
+	* use http://www.stata-press.com/data/r12/nhanes2.dta
+	use nhanes2, clear
+```
+
+The R bit:
+
+```r
+	library(foreign)
+	nhanes2 <- read.dta("nhanes2.dta")	
+	# nhanes2 <- read.dta("http://www.stata-press.com/data/r12/nhanes2.dta")
+```
+
+In this data set, the high blood pressure variable was miscoded, and it needs
+to be fixed.
+
+The Stata bit:
+
+```s
+	table highbp, c(min bpsystol max bpsystol min bpdiast max bpdiast )
+	replace highbp = (bpsystol >= 140) | (bpdiast >= 90)
+```
+
+The R bit:
+
+```r
+	tapply(nhanes2$bpsystol,nhanes2$highbp,FUN=max)
+	nhanes2$highbp <- as.integer( (nhanes2$bpsystol>=140) | (nhanes2$bpdiast>=90) )
+```
+
+## Specifying the complex sampling design
+
+The specification of the sampling design for this data set should include:
+
+* the stratification variable is `strata` (runs from 1 to 32)
+
+* the PSU varaible is `psu` (coded 1 and 2, nested within `strata`)
+
+* the weight variable `finalwgt`
+
+The Stata bit:
+
+```s
+	svyset
+	svyset psu [pw=finalwgt], strata(strata)
+	svydescribe
+```
+
+This is a data set with `s r(N)` observations, organized in `s r(N_units)` PSUs nested in `s r(N_strata)` strata.
+
+The R bit:
+
+```r
+	library(survey)
+	nhanes2.svy <- svydesign(
+		~psu, 				# PSU/cluster variable = psu, 
+		nest=TRUE,				# cluster IDs aren't unique but nested within strata
+		strata  = ~strata, 		# stratification variable = strata
+		weights = ~finalwgt,		# weight variable = finalwgt
+		data    = nhanes2			# data source
+	)
+```
+
+This is a data set with `r nrow(nhanes2.svy)` observations, organized in `r nrow(unique(nhanes2.svy$cluster))` PSUs nested in
+`r nrow(unique(nhanes2.svy$strata))` strata.
+
+## One-way tabulation: proportions and counts
+
+The Stata bit: compare the formal estimation command `prop` (short for `proportion`)
+and the summary command `tab` (short for `tabulate`).
+
+```s
+	svy : tab highbp
+	svy : tab race
+	svy : prop race region
+	estat effect
+```
+
+High design effects for race are produced by two design features. First, the cluster nature of the design
+interacted with racial segregation that was typical in the U.S. in 1980s when NHANES II data were collected.
+Apparently, geographic areas corresponding to clusters were relatively homogeneous with respect to race,
+producing high intraclass correlations (see slide 28). The lower design effect for the blacks is explained
+by oversampling: there were more blacks in the sample that would have been expected from a simple random sample.
+(Technically, sampling by race isn't possible, as this information is not available on the frame; however, given
+the geographic segregation of the races, sample designers were able to achieve higher sample sizes of blacks
+by sampling *areas* where blacks tended to live at higher rates than the white areas.)
+
+Category population totals can be produced with `count` option:
+
+```s
+	svy : tab race, count
+	svy : tab race, count se
+```
+
+The R bit: all estimation commands in `library(survey)` package
+have formula as the first argument and design object as the second argument.
+One-way tabulations are run with `svymean()` which produces the category
+indicators as needed.
+
+```r
+	svymean(~highbp,design=nhanes2.svy)
+	svymean(~as.factor(highbp),design=nhanes2.svy)
+	svymean(~race,nhanes2.svy)
+	svymean(~race + region,nhanes2.svy)
+```
+
+Category population totals can be produced with `svytotal` function:
+
+```r
+	svytotal(~race,nhanes2.svy)
+```
+
+It may be worth looking a little bit deeper into how the survey commands work,
+and what they leave behind.
+
+Stata stores estimation result components: the coefficient estimates vector
+`e(b)` (whose components can be referred to as `_b[coefficient_name]`)
+and `e(V)`, as well the various bits of information on the design, such as 
+the number of design degrees of freedom `e(df_r)`, estimate of the population
+size `e(N_pop)`, and others:
+
+```s
+	svy : prop race
+	matrix list e(b)
+	matrix list e(V)
+	ereturn list
+```
+
+Stata also allows to easily estimate the design effects for the latest estimated
+survey command:
+
+```s
+	estat effect
+```
+
+A somewhat obscure exception is `svy: tabulate`. Stata pretends this is not
+an estimation command, but in fact it has most of the components. The estimates
+can be referred to as `_b[prc]` where `r` is the row and `c` is the column.
+
+```s
+	svy : tab race
+	matrix list e(b)
+	matrix list e(V)
+	ereturn list
+	lincom _b[p11]
+```
+
+In R, the best way to get the components of the survey estimation results out
+is by the corresponding class methods:
+
+```r
+	svy.prop.race <- svymean(~race,nhanes2.svy)
+	coef(svy.prop.race)
+	SE(svy.prop.race)
+	confint(svy.prop.race)
+```
+
+## Two-way tabulations
+
+The primary methodological complication with two-way tabulations is the distribution 
+of the goodness of fit/independence test. (The null hypothesis is that the margins
+of the table are independent of one another.) With i.i.d. data, the asymptotic distribution
+of the Pearson test of the differences between expected and observed counts is $\chi^2$.
+With survey data, the distribution is a sum of $\chi^2_1$, with weights determined
+by the generalized design effects (eigenvalues of the diagonal matrix which is the product
+of the design-based variance-covariance matrix of estimated counts times the inverse of 
+the SRS-based variance-covariance matrix). This is a non-standard distribution, with
+the most common approximation being the Satterthwaite moment approximation yielding
+a $\chi^2$ or an F distribution with fractional degrees of freedom.
+
+The Stata bit:
+
+```s
+	svy : tab highbp race
+```
+
+Note the fractional degrees of freedom: `s %4.2f e(df1_Pear)` in the numerator, which is the
+approximation for two degrees of freedom that an i.i.d. Pearson test would have had;
+and `s %5.2f e(df2_Pear)` which is a midpoint of kinds between the design degrees of freedom, `s e(df_r)`,
+and the nominal sample size, `s e(N)`. Uncorrected chi-square is useless.
+
+The column/row proportions can be easily requested with the `col` or `row` options:
+```s
+	* with column proportions
+	svy : tab highbp race, col se
+	* with row proportions
+	svy : tab highbp race, row se
+```
+
+Totals can be requested with the `count` option (some degree of formatting may be recommended for large
+numbers; `format(%9.0fc)` requests nine digits, with millions and thousands separated by commas,
+and no digits after the decimal point):
+```s
+	svy : tab highbp race, count se format(%9.0fc)
+```
+
+The R bit:
+
+```r
+	svytable(~highbp+race,nhanes2.svy)
+```
+
+The results are reported on the scale of weighted totals. The $\chi^2$ statistic needs to be requested
+separately:
+
+```r
+	svychisq(~highbp+race,nhanes2.svy)
+```
+
+The `survey` package in R provides for a variety of ways to compute the tail probabilities
+of the asymptotic distribution of the goodness of fit/independence test.
+
+```r
+for(st in c("F",  "Chisq","Wald","adjWald","saddlepoint")) {
+  cat("Statistic option = ",st,"\n")
+  print(svychisq(~highbp+race,nhanes2.svy,stat=st))
+}
+```
+
+Note that the Stata results are reproduced by `svychisq(...,statistic="F")` specification.
+
+If you need the tabulation in terms of cell proportions, `svymean` with `~interaction()` formula
+can be used:
+
+```r
+	(svyxtab <- svymean(~interaction(highbp,race),nhanes2.svy))
+	ftable(svyxtab,rownames=list(highbp=c("Normal BP","Hypertonic"),race=c("White","Black","Other")))
+```
+
+Finally, for the row proportions, the best choice is `svyby()` function which acts in `apply`-like fashion
+over subsets of the data:
+
+```r
+	svyby(~highbp,by=~race,design=nhanes2.svy,FUN=svymean)
+	svyby(~as.factor(highbp),by=~race,design=nhanes2.svy,FUN=svymean)
+	svyby(~as.factor(highbp),by=~race,design=nhanes2.svy,FUN=svymean)[,1:3]
+```
+
+## Summaries for continuous variables
+
+Stata bit: moments can be estimated using `mean`:
+
+```s
+	svy : mean bpsystol bpdiast
+	estat effect
+	matrix list e(V)
+```
+
+As covariances between estimates are properly computed,
+contrasts and other linear combinations can be produced with `lincom` command:
+
+```s
+	lincom bpsystol - bpdiast
+```
+
+Distribution histogram:
+
+```s
+	hist bmi [fw=finalwgt]
+	graph export bmi_hist_s.png, width(1200) replace
+```
+
+![Stata histogram of BMI](bmi_hist_s.png)
+
+R bit:
+
+```r
+	svymean(~bpsystol+bpdiast,nhanes2.svy)
+	vcov(svymean(~bpsystol+bpdiast,nhanes2.svy))
+	svycontrast(svymean(~bpsystol+bpdiast,nhanes2.svy),contrast=c(1,-1))
+```
+
+Distribution histogram (in base R graphics):
+
+```r
+	svyhist(~bmi,nhanes2.svy)
+	# png(filename="bmi_hist_r.png",res=72)
+```
+
+![R histogram of BMI](bmi_hist_r.png)
+
+## Quantiles and CDFs
+
+In terms of survey statistics, a cdf is a gynormous infinite collection of proportion estimates.
+Quantiles are even worse; they are defined by estimating equations
+$$
+	\theta_p : \mathbf{E} 1\{ X \le \theta_p \} = p
+$$
+Getting standard errors for these requires inverting the non-smooth step function, 
+which has a host of technical difficulties concering regularity conditions on the sampling design.
+
+In Stata, no standard tools for the job are available. Here's reasonably efficient code to produce the CDF.
+
+```s
+	duplicates report bmi
+	* since there are ties in BMI, need to process groups rather than individual observations
+	egen _bmi_grp_sumw = sum( finalwgt ), by( bmi )
+	* tag the first observation per group of identical BMIs
+	bysort bmi (sampl) : gen _bmi_tag = (_n==1)
+	* sum of weights
+	sum finalwgt
+	* create a cdf = running sum / sum of weights
+	gen bmi_cdf = sum( _bmi_grp_sumw*_bmi_tag ) / r(sum)
+	* check this is between 0 and 1
+	assert inrange(bmi_cdf,0,1)
+	* look at some examples
+	list *bmi* in 1/10
+	list *bmi* in -10/l
+	* restore sort order, just in case
+	sort sampl
+	* clean up the variables we no longer need
+	drop _bmi_grp_sumw _bmi_tag
+	* plot the CDF
+	label variable bmi_cdf "CDF of BMI"
+	line bmi_cdf bmi, sort
+	graph export bmi_cdf_s.png, width(1200) replace
+```
+
+![Stata CDF plot](bmi_cdf_s.png)
+
+Estimation of percentiles accounting for the complex survey design is accomplished by user-written
+command `epctile`:
+
+```s
+	epctile bmi, svy p(25 50 75)
+```
+
+R bit: in R, everything is appropriately internalized by the `survey` package:
+
+```r
+	bmi.cdf <- svycdf(~bmi,nhanes2.svy)
+	plot(bmi.cdf)
+	# export the graph -- not sure if works
+	# png(filename="bmi_hist_r.png",res=72)
+	svyquantile(~bmi,nhanes2.svy,c(0.25,0.5,0.75))
+```
+
+![R CDF plot](bmi_cdf_r.png)
+
+## Singleton PSUs
+
+A complication that is very particular to the analysis of survey data is that of single PSU per stratum.
+If you study the variance expression on slide 25 of the handouts, you will see that when n<sub>h</sub> 
+is 1, then the variance has the form of 0/0: in the numerator, the stratum mean is equal to the mean in the single unit
+in that stratum, while the denominator has n<sub>h</sub>-1=0. It appears appropriate that variance estimation
+procedures produce a reasonably informative error.
+
+By default, Stata produces a missing standard error:
+
+```s
+	svy  : mean hdresult
+```
+
+Note the message at the bottom. The issue can be further explored with `svydescribe`:
+
+```s
+	svydescribe if e(sample), single
+```
+
+Stata identified and reported `s r(N_single)` strata in which only one PSU with nonmissing `hdresult` data were available.
+(Substantively, NHANES II uses both self-reported data and, more importantly, the biospecimen measurements and instrument data.
+If the equipment is malfunctioning, the problem may affect the whole cluster where the data are collected over a period of several
+weeks.)
+
+R appears to gloss over the issue in this situation:
+
+```r
+	svymean(~hdresult,nhanes2.svy,na.rm=TRUE)
+```
+
+This behavior seems to be equivalent to the following specificaiton in Stata, where `subpop()` option is discussed
+in the next section.
+
+```s
+	svy , subpop(if !missing(hdresult)) : mean hdresult
+```
+
+That is to say, in the original example with missing standard errors, Stata applied the casewise deletion within the `mean` 
+commmand itself, presenting `svy` with a deficient data set that had singleton PSUs. The second specification, however,
+starts by subsetting the data in the way that is appropriate for `svy`, and then providing the thus filtered subset to 
+the `mean` command. In R, `survey::svymean()` does the latter in a natural way.
+
+## Subpopulations/domains
+
+Estimation of subpopulations/domains presents additional challenges, as the sample sizes
+are random variables, and that randomness needs to be taken into account. Restricting the data
+set first, and then running survey estimation, may produce weird results, including singleton PSU
+discussed above that would be carved out by the domain.
+
+The Stata bit: use `svy, subpop():` option (note that it goes before the colon), or use
+`over()` option of the estimation commands if estimates for all domains defined by a categorical
+variable are needed. The results are numerically identical.
+
+```s
+	svy, subpop(if race==2): prop highbp
+	svy : prop highbp, over(race)
+	estat effect
+```
+
+The R bit: estimation for subpopulations/domains is carried out by `svyby()`, which was used 
+earlier in the context of cross-tabulations.
+
+```r
+	svyby(~highbp,by=~race,design=nhanes2.svy,FUN=svymean)
+```
+
+## Linear models
+
+The Stata bit: provide `svy` prefix; you can use `test` command to tests coefficients, as with the "flat" regression.
+
+```s
+	svy : regress bmi i.race age sex
+	testparm i.race
+	estat effect
+```
+
+The R bit:
+
+```r
+	(bmi.reg <- svyglm(bmi~race+age+sex,nhanes2.svy))
+	regTermTest(bmi.reg,"race")
+```
+
+Rather disturbingly, R and Stata disagree on the intercept. In Stata, the intercept was `s _b[_cons]`.
+In R, the intercept was `r bmi.reg$coefficients[1]`. There also differences in how the two packages deal
+with the denominator degrees of freedom of the restriction test: Stata uses design degrees of freedom minus the number of tested
+parameters, while R, arguably more appropriately, uses residual degrees of freedom (the design degrees
+of freedom minus the number of estimated parameters).
+
+Regression diagnostics, such as influential points, should account for the idiosyncracies 
+of complex survey data analysis, such as use of weights in defining residuals, or the risks
+of producing singleton PSUs when producing leave-one-out diagnostics.
+This is currently an area of active methodological research; see `library(svydiags)` in R.
+
+## Logistic regression models
+
+The Stata bit:
+
+```s
+	svy : logit highbp i.race age sex
+	testparm i.race
+```
+
+Stata can report Archer-Lemeshow goodness of fit test for this regression (the survey-corrected
+analogue of Hosmer-Lemeshow test):
+
+```s
+	estat gof
+```
+
+The R bit: provide `family=binomial()` parameter of `svyglm`.
+
+```r
+	(logit.highbp <- svyglm(highbp ~ race+age+sex,nhanes2.svy,family=binomial()))
+	regTermTest(logit.highbp,"race")
+```
+
+Rather disturbingly, R and Stata disagree on the intercept. In Stata, the intercept was `s _b[_cons]`.
+In R, the intercept was `r logit.highbp$coef[1]`. There also differences in how the two packages deal
+with the denominator degrees of freedom of the restriction test: Stata uses design degrees of freedom minus the number of tested
+parameters, while R, arguably more appropriately, uses residual degrees of freedom (the design degrees
+of freedom minus the number of estimated parameters).
+
+## Troubleshooting
+
+In Stata, the most common problem will likely be the lack of support by `svy` of your favorite command.
+For instance, correlation is not going to work, because Stata treats it as a descriptive rather than as an estimation command:
+
+```s
+	capture noisily svy : corr bpsystol bpdiast
+```
+
+You will also encounter missing standard errors because of singleton PSUs from time to time; these would either be
+consequences of missing data, or an incorrect use of `if` restriction in the command after the colon (instead of the part
+of `subpop()` option of `svy` before the colon).
+
+In R, the common problems may include:
+
+1. missing data in the analysis variables: the `survey` package freaks out right away, which can be overriden with the standard
+`na.rm=TRUE` option of most command:
+
+```r
+	svymean(~hdresult,nhanes2.svy)
+	svymean(~hdresult,nhanes2.svy,na.rm=TRUE)
+```
+
+2. Giving the variable name without the formula `~`:
+
+```r
+	# don't:
+	# svymean(highbp,nhanes2.svy)
+	svymean(~highbp,nhanes2.svy)
+```
+
+3. Trying to provide the raw data rather than the complex survey design object:
+
+```r
+	# don't:
+	# svymean(highbp,data=nhanes2)
+	svymean(~highbp,design=nhanes2.svy)
+```
+
+Of course, the greatest user error would be analysis without survey specifications. As discussed in the workshop presentation,
+slides 26--30, both point estimates and standard errors are most likely to be wrong when the complex survey design features
+are ignored in the analysis.
+
+## References
+
+References for the course are assembled at [http://www.citeulike.org/user/ctacmo/tag/ichps2018](http://www.citeulike.org/user/ctacmo/tag/ichps2018).
+
+## Contact
+
+Stas Kolenikov, skolenik at gmail.
+
+## Markdown
+
+This tutorial was prepared using Germán Rodríguez' `markstat` Stata command
+that can produce dynamic documents that combine both R and Stata code using
+basic markdown formatting.
+See [Stata markdown webpage](http://data.princeton.edu/stata/markdown).
+R has an independent implementation of markdown via 
+[`rmarkdown` package](https://rmarkdown.rstudio.com). 
+
+To reproduce in Stata:
+
+1. Install `markstat` and `whereis` packages by Germán Rodríguez (`findit markstat` and follow instructions).
+
+2. [Install Pandoc](http://pandoc.org/installing).
+
+3. Inform Stata where Pandoc and R are located (`whereis pandoc *path_to_pandoc.exe*` and `whereis R *path_to_R.exe*`).
+
+4. If that is done, `markstat using survey-ichps2018.stmd, mathjax` should produce a viewable `survey-ichps2018.html` file.
